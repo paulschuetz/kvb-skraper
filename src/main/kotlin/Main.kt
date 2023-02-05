@@ -37,7 +37,7 @@ class Function {
                 headers = mapOf("accept" to "application/json", "content-type" to "application/json")
                 sslRelaxed = true
                 body = """
-                { "ver": "1.58", "lang": "deu", "auth": { "type": "AID", "aid": "Rt6foY5zcTTRXMQs" }, "client": { "id": "HAFAS", "type": "WEB", "name": "webapp", "l": "vs_webapp" }, "formatted": false, "svcReqL": [ { "meth": "TripSearch", "req": { "jnyFltrL": [ { "type": "GROUP", "mode": "INC", "value": "RQ_CLIENT" }, { "type": "META", "mode": "INC", "meta": "TRIP_SEARCH_CHG_PRF_STD" }, { "type": "PROD", "mode": "INC", "value": 155 } ], "getPolyline": false, "getPasslist": false, "depLocL":[{"lid":"A=1@O=Köln Severinskirche@X=6960168@Y=50923244@U=1@L=900000015@B=1@p=1673346129@","name":"Köln Severinskirche"}],"arrLocL":[{"lid":"A=1@O=Köln Mülheim Keupstr.@X=7006732@Y=50966123@U=1@L=900000631@B=1@p=1673346129@","name":"Köln Mülheim Keupstr."}], "outFrwd": true, "outTime": "$time", "outDate": "$date", "ushrp": false, "liveSearch": false, "maxChg": "1000", "minChgTime": "-1" }} ] }
+                { "ver": "1.58", "lang": "deu", "auth": { "type": "AID", "aid": "Rt6foY5zcTTRXMQs" }, "client": { "id": "HAFAS", "type": "WEB", "name": "webapp", "l": "vs_webapp" }, "formatted": false, "svcReqL": [ { "meth": "TripSearch", "req": { "jnyFltrL": [ { "type": "GROUP", "mode": "INC", "value": "RQ_CLIENT" }, { "type": "META", "mode": "INC", "meta": "TRIP_SEARCH_CHG_PRF_STD" }, { "type": "PROD", "mode": "INC", "value": 155 } ], "getPolyline": false, "getPasslist": false, "depLocL":[{"name":"Severinskirche"}],"arrLocL":[{"name":"Keupstr."}], "outFrwd": true, "outTime": "$time", "outDate": "$date", "ushrp": false, "liveSearch": true, "maxChg": "1000", "minChgTime": "-1" }} ] }
             """.trimIndent()
             }
             response {
@@ -54,9 +54,10 @@ class Function {
                         departure = parseTime(departure),
                         arrival = parseTime(arrival, departure = parseTime(departure)),
                         durationInMin = inMinutes(duration),
-                        timeUntilDeparture = toDuration(
-                            LocalDateTime.now(berlin).until(parseTime(departure), ChronoUnit.SECONDS)
-                        ).let { if (it.minutes < 0 || it.seconds < 0) NOW else it }
+                        timeUntilDepartureInSec = LocalDateTime.now(berlin)
+                            .until(parseTime(departure), ChronoUnit.SECONDS).toInt().let {
+                            if (it < 0) 0 else it
+                        }
                     )
                 }
             }
@@ -75,19 +76,6 @@ private fun parseTime(time: String, departure: LocalDateTime? = null): LocalDate
         if (departure != null && departure > it) it.plusDays(1) else it
     }
 
-private fun toDuration(seconds: Long): Duration {
-    val minutes = seconds / 60
-    val remainingSeconds = seconds - minutes * 60
-    return Duration(minutes = minutes.toInt(), seconds = remainingSeconds.toInt())
-}
-
-@Serializable
-data class Duration(
-    val minutes: Int,
-    val seconds: Int
-)
-
-val NOW = Duration(0, 0)
 
 @Serializable
 data class ConnectionResponse(
@@ -100,7 +88,7 @@ data class Connection(
     val departure: LocalDateTime,
     @Serializable(with = LocalDateTimeSerializer::class)
     val arrival: LocalDateTime,
-    val timeUntilDeparture: Duration,
+    val timeUntilDepartureInSec: Int,
     val durationInMin: Int
 )
 
