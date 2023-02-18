@@ -20,11 +20,17 @@ import java.time.temporal.ChronoUnit
 class Function {
     @OptIn(ExperimentalSerializationApi::class)
     fun handler(input: InputStream, output: OutputStream) {
-        println("Received ${input.bufferedReader().use { it.readText() }}")
-        Json.encodeToStream(ConnectionResponse(connections = fetchConnections()), output)
+        val inputRaw = input.bufferedReader().use { it.readText() }
+        println("Received $inputRaw")
+        val inputJson = Json.parseToJsonElement(inputRaw)
+        val from = inputJson.jsonObject["queryStringParameters"]?.jsonObject?.get("from")?.jsonPrimitive?.contentOrNull
+            ?: "Severinskirche"
+        val to = inputJson.jsonObject["queryStringParameters"]?.jsonObject?.get("to")?.jsonPrimitive?.contentOrNull
+            ?: "Severinstr."
+        Json.encodeToStream(ConnectionResponse(connections = fetchConnections(from, to)), output)
     }
 
-    fun fetchConnections(): List<Connection> {
+    fun fetchConnections(from: String, to: String): List<Connection> {
         val berlin = ZoneId.of("Europe/Berlin")
 
         val date = LocalDate.now(berlin).format(DateTimeFormatter.ofPattern("YYYYMMdd"))
@@ -37,7 +43,7 @@ class Function {
                 headers = mapOf("accept" to "application/json", "content-type" to "application/json")
                 sslRelaxed = true
                 body = """
-                { "ver": "1.58", "lang": "deu", "auth": { "type": "AID", "aid": "Rt6foY5zcTTRXMQs" }, "client": { "id": "HAFAS", "type": "WEB", "name": "webapp", "l": "vs_webapp" }, "formatted": false, "svcReqL": [ { "meth": "TripSearch", "req": { "jnyFltrL": [ { "type": "GROUP", "mode": "INC", "value": "RQ_CLIENT" }, { "type": "META", "mode": "INC", "meta": "TRIP_SEARCH_CHG_PRF_STD" }, { "type": "PROD", "mode": "INC", "value": 155 } ], "getPolyline": false, "getPasslist": false, "depLocL":[{"name":"Severinskirche"}],"arrLocL":[{"name":"Keupstr."}], "outFrwd": true, "outTime": "$time", "outDate": "$date", "ushrp": false, "liveSearch": true, "maxChg": "1000", "minChgTime": "-1" }} ] }
+                { "ver": "1.58", "lang": "deu", "auth": { "type": "AID", "aid": "Rt6foY5zcTTRXMQs" }, "client": { "id": "HAFAS", "type": "WEB", "name": "webapp", "l": "vs_webapp" }, "formatted": false, "svcReqL": [ { "meth": "TripSearch", "req": { "jnyFltrL": [ { "type": "GROUP", "mode": "INC", "value": "RQ_CLIENT" }, { "type": "META", "mode": "INC", "meta": "TRIP_SEARCH_CHG_PRF_STD" }, { "type": "PROD", "mode": "INC", "value": 155 } ], "getPolyline": false, "getPasslist": false, "depLocL":[{"name":"${from}"}],"arrLocL":[{"name":"${to}"}], "outFrwd": true, "outTime": "$time", "outDate": "$date", "ushrp": false, "liveSearch": true, "maxChg": "1000", "minChgTime": "-1" }} ] }
             """.trimIndent()
             }
             response {
@@ -49,6 +55,7 @@ class Function {
                         ?: arrElement.jsonObject["arr"]!!.jsonObject["aTimeS"]?.jsonPrimitive?.contentOrNull!!
                     val departure = arrElement.jsonObject["dep"]!!.jsonObject["dTimeR"]?.jsonPrimitive?.contentOrNull
                         ?: arrElement.jsonObject["dep"]!!.jsonObject["dTimeS"]?.jsonPrimitive?.contentOrNull!!
+                    val changes = arrElement.jsonObject["chg"]!!.jsonPrimitive.int
 
                     Connection(
                         departure = parseTime(departure),
@@ -56,8 +63,10 @@ class Function {
                         durationInMin = inMinutes(duration),
                         timeUntilDepartureInSec = LocalDateTime.now(berlin)
                             .until(parseTime(departure), ChronoUnit.SECONDS).toInt().let {
-                            if (it < 0) 0 else it
-                        }
+                                if (it < 0) 0 else it
+                            },
+                        departureEpoch = parseTime(departure).atZone(berlin).toEpochSecond(),
+                        changes = changes
                     )
                 }
             }
@@ -86,10 +95,12 @@ data class ConnectionResponse(
 data class Connection(
     @Serializable(with = LocalDateTimeSerializer::class)
     val departure: LocalDateTime,
+    val departureEpoch: Long,
     @Serializable(with = LocalDateTimeSerializer::class)
     val arrival: LocalDateTime,
     val timeUntilDepartureInSec: Int,
-    val durationInMin: Int
+    val durationInMin: Int,
+    val changes: Int
 )
 
 object LocalDateTimeSerializer : KSerializer<LocalDateTime> {
@@ -105,5 +116,12 @@ object LocalDateTimeSerializer : KSerializer<LocalDateTime> {
 }
 
 fun main() {
-    println(Json.encodeToString(Function().fetchConnections()))
+    println(
+        Json.encodeToString(
+            Function().fetchConnections(
+                from = "Severinstr.",
+                to = "Wiener Platz"
+            )
+        )
+    )
 }
