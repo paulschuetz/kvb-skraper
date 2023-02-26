@@ -50,12 +50,35 @@ class Function {
                 val jsonTree = Json.decodeFromString<JsonObject>(this.responseBody)
 
                 return@response jsonTree["svcResL"]!!.jsonArray[0].jsonObject["res"]!!.jsonObject["outConL"]!!.jsonArray.map { arrElement ->
-                    val duration = arrElement.jsonObject["dur"]!!.jsonPrimitive.contentOrNull!!
+                    val duration = arrElement.jsonObject["dur"]!!.jsonPrimitive.content
                     val arrival = arrElement.jsonObject["arr"]!!.jsonObject["aTimeR"]?.jsonPrimitive?.contentOrNull
-                        ?: arrElement.jsonObject["arr"]!!.jsonObject["aTimeS"]?.jsonPrimitive?.contentOrNull!!
+                        ?: arrElement.jsonObject["arr"]!!.jsonObject["aTimeS"]?.jsonPrimitive?.content!!
                     val departure = arrElement.jsonObject["dep"]!!.jsonObject["dTimeR"]?.jsonPrimitive?.contentOrNull
-                        ?: arrElement.jsonObject["dep"]!!.jsonObject["dTimeS"]?.jsonPrimitive?.contentOrNull!!
+                        ?: arrElement.jsonObject["dep"]!!.jsonObject["dTimeS"]?.jsonPrimitive?.content!!
                     val changes = arrElement.jsonObject["chg"]!!.jsonPrimitive.int
+                    val steps = arrElement.jsonObject["secL"]!!.jsonArray.map { step ->
+                        val departureTime = step.jsonObject["dep"]!!.jsonObject["dTimeR"]?.jsonPrimitive?.contentOrNull
+                            ?: step.jsonObject["dep"]!!.jsonObject["dTimeS"]!!.jsonPrimitive.content
+                        val arrivalTime = step.jsonObject["arr"]!!.jsonObject["aTimeR"]?.jsonPrimitive?.contentOrNull
+                            ?: step.jsonObject["arr"]!!.jsonObject["aTimeS"]!!.jsonPrimitive.content
+                        if (step.jsonObject["type"]!!.jsonPrimitive.contentOrNull == "JNY") {
+                            val regex = Regex(""".+@O=(.+?)@.+@O=(.+?)@.+\s{4,7}(.+?)\$.+""")
+                            val (_, start, dest, mobility) = regex.matchEntire(step.jsonObject["jny"]!!.jsonObject["ctxRecon"]!!.jsonPrimitive.contentOrNull!!)!!.groupValues
+                            ConnectionStep(
+                                mobilityName = mobility,
+                                start = start,
+                                destination = dest,
+                                departureTime = parseTime(departureTime).atZone(berlin).toEpochSecond(),
+                                arrivalTime = parseTime(arrivalTime).atZone(berlin).toEpochSecond()
+                            )
+                        } else {
+                            ConnectionStep(
+                                mobilityName = "Walking",
+                                departureTime = parseTime(departureTime).atZone(berlin).toEpochSecond(),
+                                arrivalTime = parseTime(arrivalTime).atZone(berlin).toEpochSecond()
+                            )
+                        }
+                    }
 
                     Connection(
                         departure = parseTime(departure),
@@ -66,7 +89,8 @@ class Function {
                                 if (it < 0) 0 else it
                             },
                         departureEpoch = parseTime(departure).atZone(berlin).toEpochSecond(),
-                        changes = changes
+                        changes = changes,
+                        steps = steps
                     )
                 }
             }
@@ -92,12 +116,25 @@ data class ConnectionResponse(
 )
 
 @Serializable
+data class ConnectionStep(
+    // Name of bus or train or "walking"
+    val mobilityName: String,
+
+    val start: String? = null,
+    val departureTime: Long,
+
+    val destination: String? = null,
+    val arrivalTime: Long
+)
+
+@Serializable
 data class Connection(
     @Serializable(with = LocalDateTimeSerializer::class)
     val departure: LocalDateTime,
     val departureEpoch: Long,
     @Serializable(with = LocalDateTimeSerializer::class)
     val arrival: LocalDateTime,
+    val steps: List<ConnectionStep>,
     val timeUntilDepartureInSec: Int,
     val durationInMin: Int,
     val changes: Int
@@ -119,8 +156,8 @@ fun main() {
     println(
         Json.encodeToString(
             Function().fetchConnections(
-                from = "Severinstr.",
-                to = "Wiener Platz"
+                from = "Severinskirche",
+                to = "Neumarkt"
             )
         )
     )
